@@ -1,16 +1,16 @@
 """
 Pobieranie danych o budynkach z bazy BDOT10k (EGiB)
 
-UWAGA: Oficjalne serwisy WFS często wymagają autoryzacji lub nie działają.
-Ten skrypt oferuje kilka alternatywnych metod:
-1. Dane lokalne (jeśli użytkownik je posiada)
-2. Dane z OpenDataPortal (otwarty dostęp)
-3. Fallback: budynki OSM jako proxy
+UWAGA: Oficjalne serwisy WFS często nie działają.
+Ten skrypt pobiera dane z oficjalnych plików ZIP GUGiK w formacie GPKG.
 """
 import geopandas as gpd
 from loguru import logger
 from pathlib import Path
 import sys
+import requests
+import zipfile
+import tempfile
 
 # Dodaj katalog scripts do PYTHONPATH
 sys.path.insert(0, str(Path(__file__).parent))
@@ -18,6 +18,13 @@ from config import (
     STUDY_AREAS, DEFAULT_STUDY_AREA, RAW_DIR,
     CRS_POLAND, CRS_WGS84
 )
+
+# Kody TERYT powiatów dla obszarów badań
+COUNTY_CODES = {
+    "warszawa_srodmiescie": "1465",  # m.st. Warszawa
+    "piaseczno": "1418",             # Powiat piaseczyński
+    "legionowo": "1408"              # Powiat legionowski
+}
 
 def download_egib_buildings(area_name: str = None, use_local: str = None) -> gpd.GeoDataFrame:
     """
@@ -46,22 +53,51 @@ def download_egib_buildings(area_name: str = None, use_local: str = None) -> gpd
     if use_local and Path(use_local).exists():
         return load_local_buildings(use_local, area)
     
-    # Próba pobrania z internetu
-    logger.warning("⚠️  UWAGA: Oficjalne serwisy WFS GUGiK często nie działają publicznie")
-    logger.info("💡 Spróbujemy alternatywnych metod...")
-    logger.info("")
+    # Pobieranie z GUGiK (BDOT10k GPKG)
+    logger.info("💡 Pobieranie danych BDOT10k z GUGiK...")
     
-    # Metoda 1: Próba WFS (często nie działa)
     try:
-        logger.info("Metoda 1/2: Próba pobrania z WFS...")
-        gdf = download_from_wfs(area)
-        if len(gdf) > 0:
+        county_code = COUNTY_CODES.get(area_name)
+        if not county_code:
+            raise ValueError(f"Brak kodu powiatu dla {area_name}")
+        
+        # URL do ZIP z GPKG
+        zip_url = f"https://opendata.geoportal.gov.pl/bdot10k/schemat2021/GPKG/14/{county_code}_GPKG.zip"
+        logger.info(f"   URL: {zip_url}")
+        
+        # Pobierz ZIP
+        response = requests.get(zip_url)
+        response.raise_for_status()
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = Path(tmpdir) / f"{county_code}_GPKG.zip"
+            with open(zip_path, 'wb') as f:
+                f.write(response.content)
+            logger.info("✅ Pobrano ZIP")
+            
+            # Rozpakuj
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(tmpdir)
+            logger.info("✅ Rozpakowano ZIP")
+            
+            # Znajdź plik GPKG
+            gpkg_files = list(Path(tmpdir).glob("*.gpkg"))
+            if not gpkg_files:
+                raise FileNotFoundError("Brak pliku GPKG w ZIP")
+            gpkg_path = gpkg_files[0]
+            logger.info(f"   GPKG: {gpkg_path.name}")
+            
+            # Wczytaj warstwę budynków (BUBD_A - budynki)
+            gdf = gpd.read_file(gpkg_path, layer="BUBD_A")
+            logger.success(f"✅ Wczytano {len(gdf)} budynków z BDOT10k")
+            
             return finalize_data(gdf, area_name, area)
+
     except Exception as e:
-        logger.warning(f"⚠️  WFS nie zadziałało: {e}")
+        logger.warning(f"⚠️ Pobieranie BDOT10k nie powiodło się: {e}")
     
-    # Metoda 2: Użyj budynków OSM jako danych referencyjnych
-    logger.info("Metoda 2/2: Użycie budynków OSM jako danych referencyjnych")
+    # Fallback: Użyj budynków OSM jako danych referencyjnych
+    logger.info("Metoda fallback: Użycie budynków OSM jako danych referencyjnych")
     logger.info("   (To nie są oficjalne dane BDOT, ale pozwolą na porównanie)")
     
     try:
@@ -82,29 +118,6 @@ def download_egib_buildings(area_name: str = None, use_local: str = None) -> gpd
     except Exception as e:
         logger.error(f"❌ Wszystkie metody zawiodły: {e}")
         raise
-
-def download_from_wfs(area: dict) -> gpd.GeoDataFrame:
-    """Próbuje pobrać dane z WFS (często nie działa)"""
-    from shapely.geometry import box
-    
-    # Lista możliwych endpointów WFS
-    wfs_urls = [
-        "WFS:https://mapy.geoportal.gov.pl/wss/service/PZGIK/BDOT10k/WFS/Budynki",
-        "WFS:https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow",
-    ]
-    
-    for url in wfs_urls:
-        try:
-            logger.info(f"   Próba: {url.split('/')[-2]}...")
-            gdf = gpd.read_file(url, bbox=area['bbox'])
-            if len(gdf) > 0:
-                logger.success(f"   ✅ Sukces!")
-                return gdf
-        except Exception as e:
-            logger.debug(f"   Błąd: {e}")
-            continue
-    
-    raise Exception("Wszystkie endpointy WFS zawiodły")
 
 def load_local_buildings(filepath: str, area: dict) -> gpd.GeoDataFrame:
     """Wczytuje budynki z lokalnego pliku"""

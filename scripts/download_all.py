@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from config import STUDY_AREAS, DEFAULT_STUDY_AREA
 from download_osm import download_osm_buildings
-from download_egib import download_egib_buildings
+from download_egib_v2 import download_egib_buildings
 
 def download_all_data(area_name: str = None):
     """

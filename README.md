@@ -133,3 +133,7 @@ Wszystkie ustawienia znajdziesz w `scripts/config.py`:
 - URL do WFS
 - Parametry CRS
 - Ścieżki katalogów
+
+
+
+pip install requests
