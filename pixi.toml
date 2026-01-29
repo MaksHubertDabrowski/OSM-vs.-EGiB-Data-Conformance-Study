@@ -9,12 +9,12 @@ platforms = ["win-64"]
 python = "3.11.*"
 geopandas = ">=1.0"
 loguru = "*"
-osmnx = ">=2.0"
-pandas = ">=2.0"
+osmnx = ">=1.9"
+pandas = ">=2.1"
+pyogrio = "*"
 
-[activation]
-# Dodajemy dwie ścieżki: site-packages (dla kodu) oraz bin (dla silnika graficznego/DLL)
-env = { PYTHONPATH = "C:/Program Files/ArcGIS/Pro/bin/Python/envs/arcgispro-py3/Lib/site-packages", PATH = "C:/Program Files/ArcGIS/Pro/bin;${PATH}" }
+# UWAGA: Usunęliśmy sekcję [activation]. 
+# Ścieżki do ArcGIS obsłuży skrypt check_install.py
 
 [tasks]
 check-env = "python scripts/check_install.py"
