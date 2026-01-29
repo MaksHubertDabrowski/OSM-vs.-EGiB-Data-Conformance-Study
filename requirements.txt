@@ -1,0 +1,5 @@
+geopandas>=1.0
+loguru
+osmnx>=1.9
+pandas>=2.1
+pyogrio
